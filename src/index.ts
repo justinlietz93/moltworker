@@ -139,13 +139,11 @@ app.use('*', async (c, next) => {
   const sandbox = getSandbox(c.env.Sandbox, 'openclaw', options);
   c.set('sandbox', sandbox);
 
-  // Restore from backup on first access (idempotent, once per Worker isolate)
-  try {
-    await restoreIfNeeded(sandbox, c.env.BACKUP_BUCKET);
-  } catch (err) {
-    console.error('[middleware] Backup restore failed:', err);
-    // Continue anyway — fresh container is better than no container
-  }
+  // NOTE: restoreIfNeeded is NOT called here in the global middleware.
+  // It's called only from the catch-all route (gateway proxy) and /api/status.
+  // Calling it on admin routes (sync, debug/cli) would mount a FUSE overlay
+  // that interferes with createBackup — the SDK resets the overlay on backup,
+  // wiping any upper-layer writes made since the last restore.
 
   await next();
 });
@@ -242,6 +240,16 @@ app.all('*', async (c) => {
   const url = new URL(request.url);
 
   console.log('[PROXY] Handling request:', url.pathname);
+
+  // Restore from backup before starting the gateway.
+  // This is only called here (catch-all) and from /api/status — NOT from admin
+  // routes like sync or debug/cli, because the SDK resets the FUSE overlay on
+  // createBackup, wiping upper-layer writes.
+  try {
+    await restoreIfNeeded(sandbox, c.env.BACKUP_BUCKET);
+  } catch (err) {
+    console.error('[PROXY] Backup restore failed:', err);
+  }
 
   // Check if gateway is already running
   const existingProcess = await findExistingGatewayProcess(sandbox);

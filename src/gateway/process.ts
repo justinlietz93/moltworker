@@ -4,6 +4,15 @@ import { GATEWAY_PORT, STARTUP_TIMEOUT_MS } from '../config';
 import { buildEnvVars } from './env';
 
 /**
+ * Check if the gateway port is already listening via a TCP probe.
+ * Used as a safety net when listProcesses() fails to detect the gateway.
+ */
+export async function isGatewayPortOpen(sandbox: Sandbox): Promise<boolean> {
+  const result = await sandbox.exec(`nc -z localhost ${GATEWAY_PORT}`);
+  return result.exitCode === 0;
+}
+
+/**
  * Find an existing OpenClaw gateway process
  *
  * @param sandbox - The sandbox instance
@@ -50,9 +59,10 @@ export async function findExistingGatewayProcess(sandbox: Sandbox): Promise<Proc
  *
  * @param sandbox - The sandbox instance
  * @param env - Worker environment bindings
- * @returns The running gateway process
+ * @returns The running gateway process, or null if the gateway is up but we
+ *          don't have a process handle (detected via port probe only)
  */
-export async function ensureGateway(sandbox: Sandbox, env: OpenClawEnv): Promise<Process> {
+export async function ensureGateway(sandbox: Sandbox, env: OpenClawEnv): Promise<Process | null> {
   // Check if gateway is already running or starting
   const existingProcess = await findExistingGatewayProcess(sandbox);
   if (existingProcess) {
@@ -81,6 +91,20 @@ export async function ensureGateway(sandbox: Sandbox, env: OpenClawEnv): Promise
         console.log('Failed to kill process:', killError);
       }
     }
+  }
+
+  // Safety net: the process wasn't found by listProcesses() (e.g. the command
+  // string didn't match any known pattern), but the gateway may still be running.
+  // Probe the port directly — if it's open, the gateway is up and we're done.
+  try {
+    if (await isGatewayPortOpen(sandbox)) {
+      console.log(
+        `Port ${GATEWAY_PORT} already open — gateway running but undetected by listProcesses(), skipping spawn`,
+      );
+      return null;
+    }
+  } catch (e) {
+    console.log('Port probe failed, proceeding to start gateway:', e);
   }
 
   // Start a new OpenClaw gateway

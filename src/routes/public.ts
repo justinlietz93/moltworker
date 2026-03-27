@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import type { AppEnv } from '../types';
 import { GATEWAY_PORT } from '../config';
 import { findExistingGatewayProcess, ensureGateway } from '../gateway';
+import { restoreIfNeeded } from '../persistence';
 
 /**
  * Public routes - NO Cloudflare Access authentication required
@@ -33,6 +34,13 @@ publicRoutes.get('/logo-small.png', (c) => {
 // GET /api/status - Public health check for gateway status (no auth required)
 publicRoutes.get('/api/status', async (c) => {
   const sandbox = c.get('sandbox');
+
+  // Restore from backup before checking/starting the gateway
+  try {
+    await restoreIfNeeded(sandbox, c.env.BACKUP_BUCKET);
+  } catch (err) {
+    console.error('[api/status] Backup restore failed:', err);
+  }
 
   try {
     let process = await findExistingGatewayProcess(sandbox);

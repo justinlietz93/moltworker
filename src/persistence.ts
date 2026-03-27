@@ -28,7 +28,12 @@ async function deleteHandle(bucket: R2Bucket): Promise<void> {
 
 /**
  * Restore the most recent backup if one exists and hasn't been restored yet.
- * Called on every request before proxying to the gateway.
+ *
+ * IMPORTANT: This must only be called from the catch-all route (gateway proxy)
+ * and /api/status — NOT from admin routes like sync or debug/cli. The Sandbox
+ * SDK's createBackup() resets the FUSE overlay, wiping any upper-layer writes.
+ * If restoreIfNeeded mounts an overlay before createBackup runs, the backup
+ * will lose files written to the upper layer.
  *
  * The backup handle is read from R2 (persisted across Worker isolate restarts).
  * An in-memory flag prevents redundant restores within the same isolate.
@@ -41,6 +46,16 @@ export async function restoreIfNeeded(sandbox: Sandbox, bucket: R2Bucket): Promi
     console.log('[persistence] No backup handle found in R2, skipping restore');
     restored = true;
     return;
+  }
+
+  // Unmount any existing FUSE overlay before restoring. If the Worker isolate
+  // recycled, a previous restore's overlay may still be mounted with stale
+  // upper-layer state (e.g. deleted files via whiteout entries). A fresh
+  // mount from the backup gives us a clean lower layer.
+  try {
+    await sandbox.exec(`umount ${BACKUP_DIR} 2>/dev/null; true`);
+  } catch {
+    // May not be mounted
   }
 
   console.log(`[persistence] Restoring backup ${handle.id}...`);
