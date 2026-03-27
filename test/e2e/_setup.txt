@@ -24,8 +24,28 @@ navigate to main page and wait for worker to be ready
 ===
 TOKEN=$(cat "$CCTR_FIXTURE_DIR/gateway-token.txt")
 WORKER_URL=$(cat "$CCTR_FIXTURE_DIR/worker-url.txt")
+
+# Start a background debug loop that polls /api/status and logs responses.
+# This helps diagnose why the gateway sometimes fails to start in CI.
+(
+  for i in $(seq 1 60); do
+    RESP=$(./curl-auth -s -m 10 "$WORKER_URL/api/status" 2>/dev/null || echo '{"error":"curl failed"}')
+    echo "[debug-poll $i] $(date +%H:%M:%S) $RESP" >&2
+    OK=$(echo "$RESP" | jq -r '.ok // false' 2>/dev/null)
+    if [ "$OK" = "true" ]; then
+      echo "[debug-poll] Gateway is up!" >&2
+      break
+    fi
+    sleep 8
+  done
+) &
+DEBUG_PID=$!
+
 plwr -S moltworker-e2e open "$WORKER_URL/?token=$TOKEN" -T 480000
 # Wait for "Pairing required" — this ensures the WS connection has been
 # attempted and the gateway has registered a pending pairing request.
 plwr -S moltworker-e2e wait 'text=Pairing required' -T 480000
+
+# Clean up debug loop
+kill $DEBUG_PID 2>/dev/null || true
 ---

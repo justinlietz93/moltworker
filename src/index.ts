@@ -263,9 +263,12 @@ app.all('*', async (c) => {
   // routes like sync or debug/cli, because the SDK resets the FUSE overlay on
   // createBackup, wiping upper-layer writes.
   try {
-    await restoreIfNeeded(sandbox, c.env.BACKUP_BUCKET);
+    await Promise.race([
+      restoreIfNeeded(sandbox, c.env.BACKUP_BUCKET),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('Restore timeout')), 15_000)),
+    ]);
   } catch (err) {
-    console.error('[PROXY] Backup restore failed:', err);
+    console.error('[PROXY] Backup restore failed/timeout:', err);
   }
 
   // Check if gateway is already running
