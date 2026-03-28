@@ -42,10 +42,12 @@ publicRoutes.get('/api/status', async (c) => {
       // Restore synchronously — restoreBackup is a fast RPC call (~1-3s).
       // This MUST happen before ensureGateway or the gateway starts without
       // the FUSE overlay.
+      let restoreError: string | null = null;
       try {
         await restoreIfNeeded(sandbox, c.env.BACKUP_BUCKET);
       } catch (err) {
-        console.error('[api/status] Restore failed:', err);
+        restoreError = err instanceof Error ? err.message : String(err);
+        console.error('[api/status] Restore failed:', restoreError);
       }
 
       // Start the gateway synchronously with a short timeout. Workers have a
@@ -66,7 +68,7 @@ publicRoutes.get('/api/status', async (c) => {
       } catch (err) {
         console.log('[api/status] Gateway start timed out or failed, will retry on next poll');
       }
-      return c.json({ ok: false, status: 'starting' });
+      return c.json({ ok: false, status: 'starting', restoreError });
     }
 
     // Process exists, check if it's actually responding
