@@ -45,12 +45,17 @@ function computeNextRunAtMs(schedule: CronSchedule, nowMs: number): number | und
 
   // kind === 'cron'
   const expr = schedule.expr.trim();
-  if (!expr) return undefined;
-  const cron = new Cron(expr, {
-    timezone: schedule.tz?.trim() || undefined,
-  });
-  const next = cron.nextRun(new Date(nowMs));
-  return next ? next.getTime() : undefined;
+  if (!expr || expr.length > 200) return undefined;
+  try {
+    const cron = new Cron(expr, {
+      timezone: schedule.tz?.trim() || undefined,
+    });
+    const next = cron.nextRun(new Date(nowMs));
+    return next ? next.getTime() : undefined;
+  } catch {
+    // Invalid cron expression — skip this job
+    return undefined;
+  }
 }
 
 /**
